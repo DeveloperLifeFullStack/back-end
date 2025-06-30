@@ -20,8 +20,12 @@ public static class RoasterEndpoints
             [FromServices] AiRoaster ai,
             [FromBody] RoastRequest req) =>
         {
-            var roast = await ai.EvaluateCodeAsync(req.Code);
-            return Results.Ok(new { message = roast });
+            var (review, rating) = await ai.EvaluateCodeAsync(req.Code);
+            return Results.Ok(new
+            {
+                message = review,
+                rating = rating
+            });
         });
 
         return app;

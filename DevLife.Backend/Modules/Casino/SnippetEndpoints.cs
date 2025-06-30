@@ -49,7 +49,9 @@ public static class SnippetEndpoint
             UserId = userId,
             Language = request.Language,
             CorrectSnippet = correctSnippet,
-            BuggySnippet = buggySnippet
+            BuggySnippet = buggySnippet,
+            CorrectOption = correctOption
+
         };
 
         await mongo.Snippets.InsertOneAsync(snippet);
@@ -82,43 +84,40 @@ public static class SnippetEndpoint
             return Results.NotFound("Snippet not found or not yours.");
 
         if (request.PointsBet > user.Points)
-        {
             return Results.BadRequest("You cannot bet more points than you currently have.");
-        }
 
         if (snippet.HasGuessed)
             return Results.BadRequest("You already guessed.");
 
-        var pair = new[] { snippet.CorrectSnippet, snippet.BuggySnippet }.OrderBy(_ => snippet.Id).ToArray();
-        var selected = request.SelectedOption.ToUpperInvariant() switch
-        {
-            "A" => pair[0],
-            "B" => pair[1],
-            _ => null
-        };
+        var selectedOption = request.SelectedOption.ToUpperInvariant();
 
-        if (selected is null)
+        if (selectedOption != "A" && selectedOption != "B")
             return Results.BadRequest("Invalid option selected. Choose 'A' or 'B'.");
 
-        var isCorrect = selected == snippet.CorrectSnippet;
+        bool isCorrect = selectedOption == snippet.CorrectOption;
+
         var multiplier = ZodiacLuck.GetMultiplier(user.Zodiac);
         var reward = isCorrect ? request.PointsBet * 2 * multiplier : -request.PointsBet;
 
         user.Points += (int)reward;
-        db.Users.Update(user);
+
         UpdateStreak.ApplyStreak(user, isCorrect);
 
+        snippet.HasGuessed = true;
 
-        await mongo.Snippets.DeleteOneAsync(s => s.Id == request.SnippetId);
+        db.Users.Update(user);
+        await mongo.Snippets.ReplaceOneAsync(s => s.Id == snippet.Id, snippet);
+
         await db.SaveChangesAsync();
 
         return Results.Ok(new
         {
             IsCorrect = isCorrect,
-            ChosenOption = request.SelectedOption.ToUpper(),
+            ChosenOption = selectedOption,
             PointsChanged = reward,
             NewTotal = user.Points,
             Streak = user.Streak
         });
     }
+
 }

@@ -12,8 +12,8 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace DevLife.Backend.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20250624110900_AddStreakToUser")]
-    partial class AddStreakToUser
+    [Migration("20250627122113_InitialCleanRebuild")]
+    partial class InitialCleanRebuild
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -103,6 +103,47 @@ namespace DevLife.Backend.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("Users");
+                });
+
+            modelBuilder.Entity("DevLife.Backend.Modules.BugChase.Score", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("HighScore")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("Timestamp")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId")
+                        .IsUnique();
+
+                    b.ToTable("Scores");
+                });
+
+            modelBuilder.Entity("DevLife.Backend.Modules.BugChase.Score", b =>
+                {
+                    b.HasOne("DevLife.Backend.Domain.User", "User")
+                        .WithOne("Score")
+                        .HasForeignKey("DevLife.Backend.Modules.BugChase.Score", "UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("DevLife.Backend.Domain.User", b =>
+                {
+                    b.Navigation("Score");
                 });
 #pragma warning restore 612, 618
         }

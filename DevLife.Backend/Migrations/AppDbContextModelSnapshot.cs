@@ -113,9 +113,6 @@ namespace DevLife.Backend.Migrations
                     b.Property<int>("HighScore")
                         .HasColumnType("integer");
 
-                    b.Property<int>("Points")
-                        .HasColumnType("integer");
-
                     b.Property<DateTime>("Timestamp")
                         .HasColumnType("timestamp with time zone");
 

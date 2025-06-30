@@ -30,8 +30,12 @@ public static class LoginUserEndpoint
                 user = new
                 {
                     user.Id,
+                    user.Username,
                     user.FirstName,
+                    user.LastName,
+                    user.BirthDate,
                     user.Zodiac,
+                    user.Stack,
                     Emoji = emoji,
                     user.Points
                 },

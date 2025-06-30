@@ -1,23 +1,27 @@
 ﻿using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace DevLife.Backend.Services;
 
 public class GitHubAnalyzerService
 {
-    private readonly HttpClient _http;
+    private readonly HttpClient _http; // GitHub client
     private readonly IConfiguration _config;
+    private readonly IHttpClientFactory _httpClientFactory;
 
-    public GitHubAnalyzerService(HttpClient http, IConfiguration config)
+    public GitHubAnalyzerService(HttpClient http, IConfiguration config, IHttpClientFactory httpClientFactory)
     {
         _http = http;
         _config = config;
+        _httpClientFactory = httpClientFactory;
     }
 
     public async Task<List<string>> GetCommitMessagesAsync(string owner, string repo, string token)
     {
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        _http.DefaultRequestHeaders.UserAgent.Clear();
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("DevLifeAnalyzer");
 
         var url = $"https://api.github.com/repos/{owner}/{repo}/commits";
@@ -29,8 +33,9 @@ public class GitHubAnalyzerService
         var json = await response.Content.ReadAsStringAsync();
         var commits = JsonDocument.Parse(json).RootElement.EnumerateArray();
 
-        return commits.Select(c => c.GetProperty("commit").GetProperty("message").GetString() ?? "")
-                      .ToList();
+        return commits
+            .Select(c => c.GetProperty("commit").GetProperty("message").GetString() ?? "")
+            .ToList();
     }
 
     public async Task<object> AnalyzePersonalityAsync(List<string> commits)
@@ -40,17 +45,14 @@ public class GitHubAnalyzerService
         var prompt = $$"""
         You are an expert developer personality profiler.
 
-        Analyze the following Git commit messages and return the result strictly in JSON format with the following structure:
+        Analyze the following Git commit messages and return the result as raw JSON only with this structure, without any explanation or markdown:
         {
           "type": "string - the developer personality type",
           "strengths": ["list of strengths"],
           "weaknesses": ["list of weaknesses"],
           "match": "string - similar famous developer",
-          "image_url": "string - a dynamic image URL representing the personality type"
+          "image_url": "string - placeholder, will be replaced"
         }
-
-        Use the personality type to format image_url like:
-        "https://cdn.devlife.app/cards/{type in snake_case}.png"
 
         Commit messages:
         {{commitMessages}}
@@ -70,10 +72,12 @@ public class GitHubAnalyzerService
         var requestJson = JsonSerializer.Serialize(request);
         var content = new StringContent(requestJson, Encoding.UTF8, "application/json");
 
-        _http.DefaultRequestHeaders.Authorization =
+        var openAiClient = _httpClientFactory.CreateClient();
+        openAiClient.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", _config["OpenAI:ApiKey"]);
+        openAiClient.DefaultRequestHeaders.UserAgent.ParseAdd("DevLifeAnalyzer");
 
-        var response = await _http.PostAsync("https://api.openai.com/v1/chat/completions", content);
+        var response = await openAiClient.PostAsync("https://api.openai.com/v1/chat/completions", content);
 
         if (!response.IsSuccessStatusCode)
             return new { error = $"❌ Personality analysis failed: {response.StatusCode}" };
@@ -83,20 +87,59 @@ public class GitHubAnalyzerService
 
         try
         {
-            var resultJson = JsonSerializer.Deserialize<JsonElement>(contentStr!);
+            var match = Regex.Match(contentStr!, @"\{[\s\S]*\}");
+            if (!match.Success)
+                return new { error = "❌ Could not extract valid JSON from OpenAI response." };
+
+            var resultJson = JsonSerializer.Deserialize<JsonElement>(match.Value);
+
+            var type = resultJson.GetProperty("type").GetString();
+            var strengths = resultJson.GetProperty("strengths").EnumerateArray().Select(x => x.GetString()).ToList();
+            var weaknesses = resultJson.GetProperty("weaknesses").EnumerateArray().Select(x => x.GetString()).ToList();
+            var matchName = resultJson.GetProperty("match").GetString();
+
+            // Generate image using DALL·E based on personality type
+            var imageUrl = await GenerateImageFromPersonalityAsync(type!);
+
             return new
             {
-                type = resultJson.GetProperty("type").GetString(),
-                strengths = resultJson.GetProperty("strengths").EnumerateArray().Select(x => x.GetString()).ToList(),
-                weaknesses = resultJson.GetProperty("weaknesses").EnumerateArray().Select(x => x.GetString()).ToList(),
-                match = resultJson.GetProperty("match").GetString(),
-                image_url = resultJson.GetProperty("image_url").GetString()
-
+                type,
+                strengths,
+                weaknesses,
+                match = matchName,
+                image_url = imageUrl ?? "https://cdn.devlife.app/cards/default.png"
             };
         }
-        catch
+        catch (Exception ex)
         {
-            return new { error = "❌ Failed to parse OpenAI response as JSON." };
+            return new { error = $"❌ Failed to parse OpenAI response: {ex.Message}" };
         }
+    }
+
+    private async Task<string?> GenerateImageFromPersonalityAsync(string personalityType)
+    {
+        var prompt = $"An illustrated trading card for a software developer personality called '{personalityType}', cartoon-style, futuristic design, high-quality, creative.";
+
+        var request = new
+        {
+            model = "dall-e-3",
+            prompt = prompt,
+            n = 1,
+            size = "1024x1024"
+        };
+
+        var client = _httpClientFactory.CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", _config["OpenAI:ApiKey"]);
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("DevLifeImageGenerator");
+
+        var jsonContent = new StringContent(JsonSerializer.Serialize(request), Encoding.UTF8, "application/json");
+        var response = await client.PostAsync("https://api.openai.com/v1/images/generations", jsonContent);
+
+        if (!response.IsSuccessStatusCode)
+            return null;
+
+        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+        return json.GetProperty("data")[0].GetProperty("url").GetString();
     }
 }

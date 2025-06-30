@@ -58,6 +58,7 @@ builder.Services.AddJwtAuthentication(builder.Configuration);
 builder.Services.AddAuthorization();
 builder.Services.AddSingleton<JwtService>();
 
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", policy =>
@@ -113,6 +114,11 @@ app.MapAnalyzeRepoEndpoint();
 CreateDatingProfileEndpoint.Map(app);
 GetMatchesEndpoint.Map(app);
 SwipeProfileEndpoint.Map(app);
+
+app.MapGroup("/dating/ai")
+   .RequireAuthorization()
+   .WithTags("DatingApp")
+   .MapAiChatEndpoint();
 
 
 app.MapRunFromMeetingsEndpoints();
